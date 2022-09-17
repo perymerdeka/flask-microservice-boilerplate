@@ -1,0 +1,86 @@
+version: "3.9"
+
+services:
+  web-redis:
+    container_name: redis-web
+    image: redis:7.0.4-bullseye
+    restart: on-failure
+    env_file:
+      - .env
+    ports:
+      - ${REDIS_PORT_DEV}:${REDIS_PORT_DEV}
+    volumes:
+      - redis_data:/var/lib/redis/data
+    networks:
+      - web-api-network
+    
+  worker:
+    build: 
+      context: .
+    working_dir: /app/backend/
+    restart: on-failure
+    command: celery --app core.worker.celery_exc worker  --loglevel=INFO --beat -E
+    env_file:
+      - .env
+    environment:
+      - CELERY_BROKER_URL=${CELERY_BROKER_URL_DEV}
+      - CELERY_RESULT_BACKEND=${CELERY_RESULT_BACKEND_DEV}
+    depends_on:
+      - web-api
+      - web-redis
+    networks:
+      - web-api-network
+      
+  db-api:
+    container_name: web-db
+    restart: always
+    image: postgres:14
+    env_file:
+      - .env
+    ports:
+      - 5435:${DB_PORT_DEV}
+    volumes:
+      - data:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_NAME=${DB_NAME_DEV}
+      - POSTGRES_USER=${DB_USER_DEV}
+      - POSTGRES_PASSWORD=${DB_PWD_DEV}
+      - POSTGRES_DB=${DB_NAME_DEV}
+
+    networks:
+      - web-api-network
+  web-api:
+    container_name: "liveonsat-api-container"
+    restart: always
+    build:
+      context: .
+    working_dir: /app/backend
+    # command: gunicorn --bind ${APP_IP}:${APP_PORT_DEV} manage:app
+    command: flask run --host ${APP_IP_DEV} --port ${APP_PORT_DEV}
+    env_file:
+      - .env
+    environment:
+      - FLASK_ENV=${FLASK_ENV}
+      - FLASK_APP=${FLASK_APP}
+      - FLASK_DEBUG=${FLASK_DEBUG_DEV}
+      - DATABASE_URI=${DATABASE_URI_DEV}
+    volumes:
+      - .:/app
+      - media:/app/backend/media/
+    ports:
+      - ${APP_PORT_DEV}:${APP_PORT_DEV}
+    expose:
+      - ${APP_PORT_DEV}
+    depends_on:
+      - db-api
+      - liveonsat-redis
+    networks:
+      - web-api-network
+      
+networks:
+  web-api-network:
+    driver: bridge
+volumes:
+  data:
+  media:
+  redis_data:

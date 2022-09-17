@@ -1,0 +1,91 @@
+version: "3.9"
+
+services:
+  web-redis-prod:
+    container_name: redis-liveonsat
+    image: redis:7.0.4-bullseye
+    env_file:
+      - .env
+    ports:
+      - ${REDIS_PORT_DEV}:${REDIS_PORT_DEV}
+    volumes:
+      - redis_data:/var/lib/redis/data
+    networks:
+      - web-api-network-prod
+  
+  worker-prod:
+    build: 
+      context: .
+    working_dir: /app/backend/
+    restart: on-failure
+    command: celery --app core.worker.celery_exc worker  --loglevel=INFO -E -B
+    env_file:
+      - .env
+    environment:
+      - CELERY_BROKER_URL=${CELERY_BROKER_URL}
+      - CELERY_RESULT_BACKEND=${CELERY_RESULT_BACKEND}
+    depends_on:
+      - liveonsat-api
+      - liveonsat-redis
+    networks:
+      - web-api-network
+  db-api-prod:
+    container_name: web-db-prod
+    restart: on-failure
+    image: postgres:14
+    env_file:
+      - .env
+    ports:
+      - 5435:${DB_PORT}
+    volumes:
+      - data:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_NAME=${DB_NAME}
+      - POSTGRES_USER=${DB_USER}
+      - POSTGRES_PASSWORD=${DB_PWD}
+      - POSTGRES_DB=${DB_NAME}
+
+    networks:
+      - web-api-network
+  web-api-prod:
+    container_name: "web-api-container-prod"
+    restart: always
+    build:
+      context: .
+    working_dir: /app/backend
+    command: gunicorn --bind 0.0.0.0:${APP_PORT} manage:app
+    env_file:
+      - .env
+    environment:
+      - FLASK_APP=${FLASK_APP}
+      - FLASK_DEBUG=${FLASK_DEBUG}
+      - DATABASE_URI=${DATABASE_URI}
+    volumes:
+      - .:/app
+      - media:/app/backend/media/
+    ports:
+      - ${APP_PORT}:${APP_PORT}
+    depends_on:
+      - db-api
+      - liveonsat-redis
+    networks:
+      - web-api-network
+  nginx:
+    build: ./nginx
+    volumes:
+      - media:/app/backend/media/
+    container_name: web-api-nginx
+    env_file:
+      - .env
+    ports:
+      - 1338:80
+    depends_on:
+      - web-api
+    networks:
+      - web-api-network
+networks:
+  web-api-network:
+    driver: bridge
+volumes:
+  data:
+  media:
